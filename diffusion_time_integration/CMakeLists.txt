@@ -92,3 +92,4 @@ ENDIF()
 #link against deal.II, include headers of deal.II
 TARGET_LINK_LIBRARIES(${_target} ${DEAL_II_LIBRARIES_${_build_toupper}})
 TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${DEAL_II_INCLUDE_DIRS})
+

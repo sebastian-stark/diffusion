@@ -137,7 +137,7 @@ int main()
 																									// (0: Miehe's method, 1: alpha-family, 2: modified alpha-family)
 	MappingQGeneric<spacedim, spacedim> mapping_domain(1);											// FE mapping on domain
 	MappingQGeneric<spacedim-1, spacedim> mapping_interface(1);										// FE mapping on interfaces
-	const unsigned int n_subdivisions = 2;															// number of element subdivisions in output
+	const unsigned int n_subdivisions = 1;															// number of element subdivisions in output
 
 
 	// refinements in time
@@ -335,6 +335,8 @@ int main()
 
 // first generate reference solution for comparison
 	BlockSolverWrapperUMFPACK solver_wrapper;
+	global_data.set_threshold_residual(1e-15);
+	global_data.set_perform_line_search(false);
 	FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model_reference(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, solver_wrapper);
 
 	// post processing quantities
@@ -372,6 +374,9 @@ int main()
 	for(unsigned int refinement_step = 0; refinement_step < max_ref_t; ++refinement_step)
 	{
 		global_data.reinit();
+		global_data.set_threshold_residual(1e-15);
+		global_data.set_perform_line_search(false);
+		global_data.set_max_iter(15);
 
 		FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, solver_wrapper);
 
@@ -404,7 +409,7 @@ int main()
 		cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), true);
 		double d = 1e16;
 		if(!error)
-			d = fe_model_reference.compute_distance_to_other_solution(fe_model, QGauss<spacedim>(3), QGauss<spacedim-1>(3), VectorTools::NormType::Linfty_norm, cm_domain, cm_interface).first;
+			d = fe_model_reference.compute_distance_to_other_solution(fe_model, QGaussLobatto<spacedim>(degree+1), QGaussLobatto<spacedim-1>(degree+1), VectorTools::NormType::Linfty_norm, cm_domain, cm_interface).first;
 		fprintf(printout, "%- 1.16e %- 1.16e %- 1.16e\n", dt, d, timer.cpu_time());
 		steps *= 2;
 	}
