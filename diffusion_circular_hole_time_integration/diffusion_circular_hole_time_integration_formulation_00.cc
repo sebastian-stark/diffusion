@@ -133,13 +133,12 @@ int main()
 
 	// numerical parameters
 	const unsigned int degree = 1;																	// degree of finite element approximation
-	const double alpha = 1.0;																		// time integration parameter
-	const unsigned int method = 0;																	// numerical method
+	const double alpha = 0.0;																		// time integration parameter
+	const unsigned int method = 1;																	// numerical method
 																									// (0: Miehe's method, 1: alpha-family, 2: modified alpha-family)
 	MappingQGeneric<spacedim, spacedim> mapping_domain(1);											// FE mapping on domain
 	MappingQGeneric<spacedim-1, spacedim> mapping_interface(1);										// FE mapping on interfaces
 	const unsigned int n_subdivisions = 1;															// number of element subdivisions in output
-
 
 	// refinements in time
 	const unsigned int steps_min = 1;																// minimum number of time steps until final time
@@ -153,7 +152,7 @@ int main()
 	const string file_name_ref	= "results/results_ref.dat";										// file where reference solution is stored
 	const bool read_reference_from_file = true;														// determines whether reference solution is read from file or computed
 																									// (of course, it must be computed at least once ...)
-	const unsigned int solver_sym = 1;																// solver for method != 1: 0 - PARDISO, 1 - MA57, else - UMFPACK
+	const unsigned int solver_sym = 0;																// solver for method != 1: 0 - PARDISO, 1 - MA57, else - UMFPACK
 	const unsigned int solver_unsym = 1;															// solver for method == 1: 0 - PARDISO, else - UMFPACK
 
 	// set up global data object for information transfer between different places and request predictor corrector algorithm if necessary
@@ -168,7 +167,6 @@ int main()
 	IndependentField<spacedim, spacedim> I("I", FE_RaviartThomas<spacedim>(degree), {0});				// flux
 	IndependentField<spacedim, spacedim> delta_c("delta_c", FE_DGQ<spacedim>(degree), 1, {0});			// change in species concentration
 	IndependentField<spacedim, spacedim> mu("mu", FE_DGQ<spacedim>(degree), 1, {0});					// Lagrangian multiplier (chemical potential)
-	IndependentField<spacedim-1, spacedim> mu_s("mu_s", FE_DGQ<spacedim-1, spacedim>(degree), 1, {1});	// Lagrangian multiplier enforcing zero normal flux
 
 /********************
  * dependent fields *
@@ -212,10 +210,6 @@ int main()
 	I_y_s.add_term(1.0, I, 1, InterfaceSide::minus);
 	if(spacedim == 3)
 		I_z_s.add_term(1.0, I, 2, InterfaceSide::minus);
-
-	// Lagrangian multiplier for normal flux boundary condition
-	DependentField<spacedim-1, spacedim> mu_s_("mu_s");
-	mu_s_.add_term(1.0, mu_s);
 
 /********
  * grid *
@@ -343,20 +337,11 @@ int main()
 													method,
 													alpha);
 
-	// Lagrangian multiplier term for incorporation of zero normal flux constraint
-	OmegaZeroNormalFlux00<spacedim> zero_normal_flux( 	{I_x_s, I_y_s, I_z_s, mu_s_},
-														{1},
-														QGauss<spacedim-1>(degree + 1),
-														global_data,
-														method,
-														alpha);
-
 	TotalPotentialContribution<spacedim> psi_c_tpc(psi_c);
 	TotalPotentialContribution<spacedim> psi_c_v_tpc(psi_c_v);
 	TotalPotentialContribution<spacedim> delta_tpc(delta);
 	TotalPotentialContribution<spacedim> constraint_c_I_tpc(constraint_c_I);
 	TotalPotentialContribution<spacedim> applied_potential_tpc(applied_potential);
-	TotalPotentialContribution<spacedim> zero_normal_flux_tpc(zero_normal_flux);
 
  	TotalPotential<spacedim> total_potential;
  	total_potential.add_total_potential_contribution(psi_c_tpc);
@@ -364,7 +349,6 @@ int main()
 	total_potential.add_total_potential_contribution(delta_tpc);
 	total_potential.add_total_potential_contribution(constraint_c_I_tpc);
 	total_potential.add_total_potential_contribution(applied_potential_tpc);
-	total_potential.add_total_potential_contribution(zero_normal_flux_tpc);
 
 	Constraints<spacedim> constraints;
 
@@ -372,29 +356,24 @@ int main()
  * set up finite element model and do computations *
  ***************************************************/
 
-// first generate reference solution for comparison
 	BlockSolverWrapperPARDISO solver_wrapper_pardiso;
-	if(method != 1)
+	if((method != 1) || (alpha == 0.0))
 		solver_wrapper_pardiso.matrix_type = 2;
 	else
 		solver_wrapper_pardiso.matrix_type = 0;
 	BlockSolverWrapperUMFPACK2 solver_wrapper_umfpack;
 	BlockSolverWrapperMA57 solver_wrapper_ma57;
 
-	// compute sparsity pattern onyl in first step and analyze linear system only in first step
-	global_data.set_compute_sparsity_pattern(1);
-	solver_wrapper_pardiso.analyze = 1;
-	solver_wrapper_umfpack.analyze = 1;
-	solver_wrapper_ma57.analyze = 1;
-
 	SolverWrapper<Vector<double>, BlockVector<double>, TwoBlockMatrix<SparseMatrix<double>>, TwoBlockSparsityPattern>* solver_wrapper;
-	if(method != 1)
+	if((method != 1) || (alpha == 0.0))
 	{
 		switch(solver_sym)
 		{
 			case 0:
 				solver_wrapper = &solver_wrapper_pardiso;
 				cout << "Selected PARDISO as solver" << endl;
+				if(alpha == 0.0)
+					solver_wrapper_pardiso.res_max = 1e16;
 				break;
 			case 1:
 				solver_wrapper = &solver_wrapper_ma57;
@@ -418,12 +397,50 @@ int main()
 				cout << "Selected UMFPACK as solver" << endl;
 		}
 	}
+	solver_wrapper_pardiso.analyze = 1;
+	solver_wrapper_umfpack.analyze = 1;
+	solver_wrapper_ma57.analyze = 1;
 	global_data.set_compute_sparsity_pattern(1);
 	global_data.set_max_iter(15);
 	global_data.set_threshold_residual(1e-15);
 	global_data.set_perform_line_search(false);
 
+// first generate reference solution for comparison
+
 	FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model_reference(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, *solver_wrapper);
+
+	// manually generate zero normal flux constraints as this is not automized for Raviart-Thomas elements
+	vector<unsigned int> dof_indices_local_global;
+	const unsigned int global_component_index_I = fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(I);
+	AffineConstraints<double> custom_constraints;
+	for(const auto& cell : fe_model_reference.get_assembly_helper().get_dof_handler_system().interface_active_iterators())
+	{
+		if(cell.refinement_case == InterfaceRefinementCase::at_boundary)
+		{
+			if(cell.interface_cell->material_id() == 1)
+			{
+				const auto& domain_cell = cell.domain_cell_minus;
+				const unsigned int face = cell.face_minus;
+				dof_indices_local_global.resize(domain_cell->get_fe().n_dofs_per_cell());
+				domain_cell.get_dof_indices(dof_indices_local_global);
+				for(unsigned int m = 0; m < domain_cell->get_fe().n_dofs_per_face(); ++m)
+				{
+					const unsigned int local_index = domain_cell->get_fe().face_to_cell_index(m, face, domain_cell->face_orientation(face), domain_cell->face_flip(face), domain_cell->face_rotation(face));
+					const auto& nonzero_components = domain_cell->get_fe().get_nonzero_components(local_index);
+					for(unsigned int d = 0; d < spacedim; ++d)
+					{
+						if(nonzero_components[global_component_index_I + d])
+						{
+							const unsigned int global_index = dof_indices_local_global[local_index];
+							custom_constraints.add_line(dof_indices_local_global[local_index]);
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+	custom_constraints.close();
 
 	// post processing quantities
 	PostprocessorConcentration<spacedim> pp_c("c", fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), 1.0, c_0);
@@ -440,7 +457,7 @@ int main()
 		for(unsigned int step = 0; step < steps_max; ++step)
 		{
 			cout << "time step " << step + 1 <<" of " << steps_max << endl;
-			if(fe_model_reference.do_time_step(t_1*(step + 1.0)/(double)steps_max) < 0)
+			if(fe_model_reference.do_time_step(t_1*(step + 1.0)/(double)steps_max, custom_constraints) < 0)
 			{
 				global_data.print_error_messages();
 				cout << "FATAL ERROR!" << endl;
@@ -464,9 +481,9 @@ int main()
 		solver_wrapper_umfpack.analyze = 1;
 		solver_wrapper_ma57.analyze = 1;
 		global_data.set_compute_sparsity_pattern(1);
+		global_data.set_max_iter(15);
 		global_data.set_threshold_residual(1e-15);
 		global_data.set_perform_line_search(false);
-		global_data.set_max_iter(15);
 
 		double solve_time = 0.0;
 		FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, *solver_wrapper);
@@ -478,7 +495,7 @@ int main()
 		for(unsigned int step = 0; step < steps; ++step)
 		{
 			cout << "time step " << step+1 <<" of " << steps << " (refinement cycle " << refinement_step << ")" << endl;
-			if(fe_model.do_time_step(t_1*(step + 1.0)/(double)steps) < 0)
+			if(fe_model.do_time_step(t_1*(step + 1.0)/(double)steps, custom_constraints) < 0)
 			{
 				cout << "FATAL ERROR!" << endl;
 				global_data.print_error_messages();
@@ -497,11 +514,11 @@ int main()
 
 		global_data.print_error_messages();
 		const double dt = t_1 / (double)steps;
-		ComponentMask cm_domain(spacedim + 2, false), cm_interface(1, false);
+		ComponentMask cm_domain(spacedim + 2, false);
 		cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), true);
 		double d = 1e16;
 		if(!error)
-			d = fe_model_reference.compute_distance_to_other_solution(fe_model, QGaussLobatto<spacedim>(degree+1), QGaussLobatto<spacedim-1>(degree+1), VectorTools::NormType::Linfty_norm, cm_domain, cm_interface).first;
+			d = fe_model_reference.compute_distance_to_other_solution(fe_model, QGaussLobatto<spacedim>(degree+1), QGaussLobatto<spacedim-1>(degree+1), VectorTools::NormType::Linfty_norm, cm_domain).first;
 		fprintf(printout, "%- 1.16e %- 1.16e %- 1.16e%- 1.16e \n", dt, d, timer.wall_time(), solve_time);
 		steps *= 2;
 	}

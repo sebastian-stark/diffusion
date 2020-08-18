@@ -110,7 +110,7 @@ int main()
  **************/
 
 	// normalization quantities
-	const double c_norm = 1.0;																		// mol/m^3
+	const double c_norm = 750.0;																	// mol/m^3
 	const double R_norm = 8.31446261815324;															// J/mol/K
 	const double T_norm = 298.0;																	// K
 	const double L_norm = 0.001;																	// m
@@ -121,15 +121,15 @@ int main()
 	const unsigned int N_refinements = 2;															// number of global refinements
 
 	// material parameters
-	const double c_0 = 1.0/c_norm;																	// initial concentration of diffusing species (mol/m^3)
-	const double c_v_0 = 1.0/c_norm;																// initial concentration of vacancies (mol/m^3)
+	const double c_0 = 750.0/c_norm;																// initial concentration of diffusing species (mol/m^3)
+	const double c_v_0 = 750.0/c_norm;																// initial concentration of vacancies (mol/m^3)
 	const double mu_0 = 0.0;																		// reference chemical potential of diffusing species divided by RT
 	const double mu_v_0 = 0.0;																		// reference chemical potential of vacancies divided by RT
 	const double D = 1e-12 / D_norm;																// Dissipation coefficient (m^2/s)
 	const double RT = (8.31446261815324 * 298.0) / (R_norm * T_norm);								// gas constant times temperature (J/mol)
-	const double lambda_mat = 1e7 / (R_norm * T_norm * c_norm);
-	const double mu_mat = 1e7 / (R_norm * T_norm * c_norm);
-	const double deps_mat = 0.2;
+	const double lambda_mat = 1.0;
+	const double mu_mat = 1.0;
+	const double deps_mat = 0.1;
 
 	// times and loading
 	const double t_1 = 0.1 * (L_norm * L_norm / D_norm) * D_norm / L_norm / L_norm;					// total time of computation (s)
@@ -138,16 +138,15 @@ int main()
 	// numerical parameters
 	const unsigned int degree = 1;																	// degree of finite element approximation
 	const double alpha = 1.0;																		// time integration parameter
-	const unsigned int method = 1;																	// numerical method
+	const unsigned int method = 0;																	// numerical method
 																									// (0: Miehe's method, 1: alpha-family, 2: modified alpha-family)
 	MappingQGeneric<spacedim, spacedim> mapping_domain(1);											// FE mapping on domain
 	MappingQGeneric<spacedim-1, spacedim> mapping_interface(1);										// FE mapping on interfaces
 	const unsigned int n_subdivisions = 1;															// number of element subdivisions in output
 
-
 	// refinements in time
 	const unsigned int steps_min = 1;																// minimum number of time steps until final time
-	const unsigned int max_ref_t = 10;																// maximum refinements in time
+	const unsigned int max_ref_t = 9;																// maximum refinements in time
 	const unsigned int steps_max = steps_min * (unsigned int)(pow(2., (double)max_ref_t) + 0.5);	// maximum number of time steps until final time
 
 	// further parameters
@@ -169,11 +168,10 @@ int main()
  * independent fields *
  **********************/
 
-	IndependentField<spacedim, spacedim> u("u", FE_Q<spacedim>(degree), spacedim, {0});								// displacement
+	IndependentField<spacedim, spacedim> u("u", FE_Q<spacedim>(degree+1), spacedim, {0});								// displacement
 	IndependentField<spacedim, spacedim> I("I", FE_RaviartThomas<spacedim>(degree), {0});							// flux
 	IndependentField<spacedim, spacedim> delta_c("delta_c", FE_DGQ<spacedim>(degree), 1, {0});						// change in species concentration
 	IndependentField<spacedim, spacedim> mu("mu", FE_DGQ<spacedim>(degree), 1, {0});								// Lagrangian multiplier (chemical potential)
-	IndependentField<spacedim-1, spacedim> mu_s("mu_s", FE_DGQ<spacedim-1, spacedim>(degree), 1, {1,2,3,4,5,6});	// Lagrangian multiplier enforcing zero normal flux
 
 /********************
  * dependent fields *
@@ -241,10 +239,6 @@ int main()
 	I_y_s.add_term(1.0, I, 1, InterfaceSide::minus);
 	if(spacedim == 3)
 		I_z_s.add_term(1.0, I, 2, InterfaceSide::minus);
-
-	// Lagrangian multiplier for normal flux boundary condition
-	DependentField<spacedim-1, spacedim> mu_s_("mu_s");
-	mu_s_.add_term(1.0, mu_s);
 
 /********
  * grid *
@@ -331,7 +325,7 @@ int main()
 	C_mat(3,3) = C_mat(4,4) = C_mat(5,5) = mu_mat;
 	PsiLinear00<spacedim> psi_m({eps_xx, eps_yy, eps_zz, gamma_xy, gamma_yz, gamma_zx},
 								{0},
-								QGauss<spacedim>(degree + 1),
+								QGauss<spacedim>(degree + 2),
 								global_data,
 								C_mat,
 								Vector<double>(6),
@@ -382,21 +376,12 @@ int main()
 													method,
 													alpha);
 
-	// Lagrangian multiplier term for incorporation of zero normal flux constraint
-	OmegaZeroNormalFlux00<spacedim> zero_normal_flux( 	{I_x_s, I_y_s, I_z_s, mu_s_},
-														{1,2,3,4,5,6},
-														QGauss<spacedim-1>(degree + 1),
-														global_data,
-														method,
-														alpha);
-
 	TotalPotentialContribution<spacedim> psi_m_tpc(psi_m);
 	TotalPotentialContribution<spacedim> psi_c_tpc(psi_c);
 	TotalPotentialContribution<spacedim> psi_c_v_tpc(psi_c_v);
 	TotalPotentialContribution<spacedim> delta_tpc(delta);
 	TotalPotentialContribution<spacedim> constraint_c_I_tpc(constraint_c_I);
 	TotalPotentialContribution<spacedim> applied_potential_tpc(applied_potential);
-	TotalPotentialContribution<spacedim> zero_normal_flux_tpc(zero_normal_flux);
 
  	TotalPotential<spacedim> total_potential;
  	total_potential.add_total_potential_contribution(psi_m_tpc);
@@ -405,11 +390,10 @@ int main()
 	total_potential.add_total_potential_contribution(delta_tpc);
 	total_potential.add_total_potential_contribution(constraint_c_I_tpc);
 	total_potential.add_total_potential_contribution(applied_potential_tpc);
-	total_potential.add_total_potential_contribution(zero_normal_flux_tpc);
 
-	Constraints<spacedim> constraints;
 	DirichletConstraint<spacedim> dc_u_z(u, 2, InterfaceSide::minus, {4});
 	DirichletConstraint<spacedim> dc_u_y(u, 1, InterfaceSide::minus, {2});
+	Constraints<spacedim> constraints;
 	constraints.add_dirichlet_constraint(dc_u_z);
 	constraints.add_dirichlet_constraint(dc_u_y);
 
@@ -417,151 +401,184 @@ int main()
  * set up finite element model and do computations *
  ***************************************************/
 
-	// first generate reference solution for comparison
-		BlockSolverWrapperPARDISO solver_wrapper_pardiso;
-		if(method != 1)
-			solver_wrapper_pardiso.matrix_type = 2;
-		else
-			solver_wrapper_pardiso.matrix_type = 0;
-		BlockSolverWrapperUMFPACK2 solver_wrapper_umfpack;
-		BlockSolverWrapperMA57 solver_wrapper_ma57;
+	BlockSolverWrapperPARDISO solver_wrapper_pardiso;
+	if((method != 1) || (alpha == 0.0))
+		solver_wrapper_pardiso.matrix_type = 2;
+	else
+		solver_wrapper_pardiso.matrix_type = 0;
+	BlockSolverWrapperUMFPACK2 solver_wrapper_umfpack;
+	BlockSolverWrapperMA57 solver_wrapper_ma57;
 
-		// compute sparsity pattern onyl in first step and analyze linear system only in first step
-		global_data.set_compute_sparsity_pattern(1);
+	SolverWrapper<Vector<double>, BlockVector<double>, TwoBlockMatrix<SparseMatrix<double>>, TwoBlockSparsityPattern>* solver_wrapper;
+	if((method != 1) || (alpha == 0.0))
+	{
+		switch(solver_sym)
+		{
+			case 0:
+				solver_wrapper = &solver_wrapper_pardiso;
+				cout << "Selected PARDISO as solver" << endl;
+				if(alpha == 0.0)
+					solver_wrapper_pardiso.res_max = 1e16;
+				break;
+			case 1:
+				solver_wrapper = &solver_wrapper_ma57;
+				cout << "Selected MA57 as solver" << endl;
+				break;
+			default:
+				solver_wrapper = &solver_wrapper_umfpack;
+				cout << "Selected UMFPACK as solver" << endl;
+		}
+	}
+	else
+	{
+		switch(solver_unsym)
+		{
+			case 0:
+				solver_wrapper = &solver_wrapper_pardiso;
+				cout << "Selected PARDISO as solver" << endl;
+				break;
+			default:
+				solver_wrapper = &solver_wrapper_umfpack;
+				cout << "Selected UMFPACK as solver" << endl;
+		}
+	}
+	solver_wrapper_pardiso.analyze = 1;
+	solver_wrapper_umfpack.analyze = 1;
+	solver_wrapper_ma57.analyze = 1;
+	global_data.set_compute_sparsity_pattern(1);
+	global_data.set_max_iter(15);
+	global_data.set_threshold_residual(1e-15);
+	global_data.set_perform_line_search(false);
+
+// first generate reference solution for comparison
+
+	FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model_reference(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, *solver_wrapper);
+
+	// manually generate zero normal flux constraints as this is not automized for Raviart-Thomas elements
+	vector<unsigned int> dof_indices_local_global;
+	const unsigned int global_component_index_I = fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(I);
+	AffineConstraints<double> custom_constraints;
+	for(const auto& cell : fe_model_reference.get_assembly_helper().get_dof_handler_system().interface_active_iterators())
+	{
+		if(cell.refinement_case == InterfaceRefinementCase::at_boundary)
+		{
+			if((cell.interface_cell->material_id() >= 1) && (cell.interface_cell->material_id() <= 6))
+			{
+				const auto& domain_cell = cell.domain_cell_minus;
+				const unsigned int face = cell.face_minus;
+				dof_indices_local_global.resize(domain_cell->get_fe().n_dofs_per_cell());
+				domain_cell.get_dof_indices(dof_indices_local_global);
+				for(unsigned int m = 0; m < domain_cell->get_fe().n_dofs_per_face(); ++m)
+				{
+					const unsigned int local_index = domain_cell->get_fe().face_to_cell_index(m, face, domain_cell->face_orientation(face), domain_cell->face_flip(face), domain_cell->face_rotation(face));
+					const auto& nonzero_components = domain_cell->get_fe().get_nonzero_components(local_index);
+					for(unsigned int d = 0; d < spacedim; ++d)
+					{
+						if(nonzero_components[global_component_index_I + d])
+						{
+							const unsigned int global_index = dof_indices_local_global[local_index];
+							custom_constraints.add_line(dof_indices_local_global[local_index]);
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// fix displacement into x-direction
+	Point<spacedim> p_u_x;
+	p_u_x(0) = -0.5 * L;
+	const unsigned int dof_index_u_x = fe_model_reference.get_assembly_helper().get_dof_index_at_point_omega(&u, 0, p_u_x);
+	custom_constraints.add_line(dof_index_u_x);
+
+	custom_constraints.close();
+
+	// post processing quantities
+	PostprocessorConcentration<spacedim> pp_c("c", fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), 1.0, c_0);
+	fe_model_reference.attach_data_postprocessor_domain(pp_c);
+	PostprocessorConcentration<spacedim> pp_c_v("c_v", fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), -1.0, c_v_0);
+	fe_model_reference.attach_data_postprocessor_domain(pp_c_v);
+
+	if(read_reference_from_file)
+	{
+		fe_model_reference.read_solution_from_file(file_name_ref);
+	}
+	else
+	{
+		for(unsigned int step = 0; step < steps_max; ++step)
+		{
+			cout << "time step " << step + 1 <<" of " << steps_max << endl;
+			if(fe_model_reference.do_time_step(t_1*(step + 1.0)/(double)steps_max, custom_constraints) < 0)
+			{
+				global_data.print_error_messages();
+				cout << "FATAL ERROR!" << endl;
+				return 1;
+			}
+			//fe_model_reference.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(max_ref_t), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(max_ref_t), n_subdivisions);
+		}
+		fe_model_reference.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(max_ref_t), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(max_ref_t), n_subdivisions);
+		global_data.print_error_messages();
+		fe_model_reference.write_solution_to_file(file_name_ref);
+	}
+
+// now compute with different step widths and compare with reference solution
+
+	FILE* printout = fopen (file_name_res.c_str(),"w");
+	unsigned int steps = steps_min;
+	for(unsigned int refinement_step = 0; refinement_step < max_ref_t; ++refinement_step)
+	{
+		global_data.reinit();
 		solver_wrapper_pardiso.analyze = 1;
 		solver_wrapper_umfpack.analyze = 1;
 		solver_wrapper_ma57.analyze = 1;
-
-		SolverWrapper<Vector<double>, BlockVector<double>, TwoBlockMatrix<SparseMatrix<double>>, TwoBlockSparsityPattern>* solver_wrapper;
-		if(method != 1)
-		{
-			switch(solver_sym)
-			{
-				case 0:
-					solver_wrapper = &solver_wrapper_pardiso;
-					cout << "Selected PARDISO as solver" << endl;
-					break;
-				case 1:
-					solver_wrapper = &solver_wrapper_ma57;
-					cout << "Selected MA57 as solver" << endl;
-					break;
-				default:
-					solver_wrapper = &solver_wrapper_umfpack;
-					cout << "Selected UMFPACK as solver" << endl;
-			}
-		}
-		else
-		{
-			switch(solver_unsym)
-			{
-				case 0:
-					solver_wrapper = &solver_wrapper_pardiso;
-					cout << "Selected PARDISO as solver" << endl;
-					break;
-				default:
-					solver_wrapper = &solver_wrapper_umfpack;
-					cout << "Selected UMFPACK as solver" << endl;
-			}
-		}
 		global_data.set_compute_sparsity_pattern(1);
 		global_data.set_max_iter(15);
 		global_data.set_threshold_residual(1e-15);
 		global_data.set_perform_line_search(false);
 
-		FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model_reference(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, *solver_wrapper);
+		double solve_time = 0.0;
+		FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, *solver_wrapper);
+		Timer timer;
+		timer.start ();
 
-		AffineConstraints<double> custom_constraints_reference(fe_model_reference.get_assembly_helper().get_locally_relevant_indices());
-		Point<spacedim> p_u_x;
-		p_u_x(0) = -0.5 * L;
-		const unsigned int dof_index_u_x = fe_model_reference.get_assembly_helper().get_dof_index_at_point_omega(&u, 0, p_u_x);
-		custom_constraints_reference.add_line(dof_index_u_x);
-
-		// post processing quantities
-		PostprocessorConcentration<spacedim> pp_c("c", fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), 1.0, c_0);
-		fe_model_reference.attach_data_postprocessor_domain(pp_c);
-		PostprocessorConcentration<spacedim> pp_c_v("c_v", fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), -1.0, c_v_0);
-		fe_model_reference.attach_data_postprocessor_domain(pp_c_v);
-
-		if(read_reference_from_file)
+		bool error = false;
+		for(unsigned int step = 0; step < steps; ++step)
 		{
-			fe_model_reference.read_solution_from_file(file_name_ref);
-		}
-		else
-		{
-			for(unsigned int step = 0; step < steps_max; ++step)
+			cout << "time step " << step+1 <<" of " << steps << " (refinement cycle " << refinement_step << ")" << endl;
+			if(fe_model.do_time_step(t_1*(step + 1.0)/(double)steps, custom_constraints) < 0)
 			{
-				cout << "time step " << step + 1 <<" of " << steps_max << endl;
-				if(fe_model_reference.do_time_step(t_1*(step + 1.0)/(double)steps_max, custom_constraints_reference) < 0)
-				{
-					global_data.print_error_messages();
-					cout << "FATAL ERROR!" << endl;
-					return 1;
-				}
-				//fe_model_reference.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(max_ref_t), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(max_ref_t), n_subdivisions);
+				cout << "FATAL ERROR!" << endl;
+				global_data.print_error_messages();
+				error = true;
+				break;
 			}
-			fe_model_reference.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(max_ref_t), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(max_ref_t), n_subdivisions);
-			global_data.print_error_messages();
-			fe_model_reference.write_solution_to_file(file_name_ref);
+			solve_time += fe_model.get_solve_time_last_step();
+			//fe_model.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(refinement_step), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(refinement_step), n_subdivisions);
 		}
+		if(!error)
+			fe_model.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(refinement_step), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(refinement_step), n_subdivisions);
 
-	// now compute with different step widths and compare with reference solution
+		timer.stop ();
+		cout << "Elapsed CPU time step: " << timer.cpu_time() << " seconds." << endl;
+		cout << "Elapsed wall time step: " << timer.wall_time() << " seconds." << endl;
 
-		FILE* printout = fopen (file_name_res.c_str(),"w");
-		unsigned int steps = steps_min;
-		for(unsigned int refinement_step = 0; refinement_step < max_ref_t; ++refinement_step)
+		global_data.print_error_messages();
+		const double dt = t_1 / (double)steps;
+		ComponentMask cm_domain(2*spacedim + 2, false);
+		cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), true);
+		for(unsigned int m = 0; m < spacedim; ++m)
+			cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(u) + m, true);
+		double d = 1e16;
+		if(!error)
 		{
-			global_data.reinit();
-			solver_wrapper_pardiso.analyze = 1;
-			solver_wrapper_umfpack.analyze = 1;
-			solver_wrapper_ma57.analyze = 1;
-			global_data.set_compute_sparsity_pattern(1);
-			global_data.set_threshold_residual(1e-15);
-			global_data.set_perform_line_search(false);
-			global_data.set_max_iter(15);
-
-			double solve_time = 0.0;
-			FEModel<spacedim, Vector<double>, BlockVector<double>, GalerkinTools::TwoBlockMatrix<SparseMatrix<double>>> fe_model(total_potential, tria_system, mapping_domain, mapping_interface, global_data, constraints, *solver_wrapper);
-
-			AffineConstraints<double> custom_constraints(fe_model.get_assembly_helper().get_locally_relevant_indices());
-			const unsigned int dof_index_u_x = fe_model.get_assembly_helper().get_dof_index_at_point_omega(&u, 0, p_u_x);
-			custom_constraints.add_line(dof_index_u_x);
-
-			Timer timer;
-			timer.start ();
-
-			bool error = false;
-			for(unsigned int step = 0; step < steps; ++step)
-			{
-				cout << "time step " << step+1 <<" of " << steps << " (refinement cycle " << refinement_step << ")" << endl;
-				if(fe_model.do_time_step(t_1*(step + 1.0)/(double)steps, custom_constraints) < 0)
-				{
-					cout << "FATAL ERROR!" << endl;
-					global_data.print_error_messages();
-					error = true;
-					break;
-				}
-				solve_time += fe_model.get_solve_time_last_step();
-				//fe_model.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(refinement_step), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(refinement_step), n_subdivisions);
-			}
-			if(!error)
-				fe_model.write_output_independent_fields("results/output_files/domain" + variant_string + "_n" + Utilities::to_string(refinement_step), "results/output_files/interface" + variant_string + "_n" + Utilities::to_string(refinement_step), n_subdivisions);
-
-			timer.stop ();
-			cout << "Elapsed CPU time step: " << timer.cpu_time() << " seconds." << endl;
-			cout << "Elapsed wall time step: " << timer.wall_time() << " seconds." << endl;
-
-			global_data.print_error_messages();
-			const double dt = t_1 / (double)steps;
-			ComponentMask cm_domain(spacedim + 2, false), cm_interface(1, false);
-			cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(delta_c), true);
-			cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(u), true);
-			cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(u)+1, true);
-			cm_domain.set(fe_model_reference.get_assembly_helper().get_u_omega_global_component_index(u)+2, true);
-			double d = 1e16;
-			if(!error)
-				d = fe_model_reference.compute_distance_to_other_solution(fe_model, QGaussLobatto<spacedim>(degree+1), QGaussLobatto<spacedim-1>(degree+1), VectorTools::NormType::Linfty_norm, cm_domain, cm_interface).first;
-			fprintf(printout, "%- 1.16e %- 1.16e %- 1.16e%- 1.16e \n", dt, d, timer.wall_time(), solve_time);
-			steps *= 2;
+			if(degree>0)
+				d = fe_model_reference.compute_distance_to_other_solution(fe_model, QGaussLobatto<spacedim>(degree+1), QGaussLobatto<spacedim-1>(degree+1), VectorTools::NormType::Linfty_norm, cm_domain).first;
+			else
+				d = fe_model_reference.compute_distance_to_other_solution(fe_model, QGaussLobatto<spacedim>(2), QGaussLobatto<spacedim-1>(2), VectorTools::NormType::Linfty_norm, cm_domain).first;
 		}
-		fclose(printout);
+		fprintf(printout, "%- 1.16e %- 1.16e %- 1.16e%- 1.16e \n", dt, d, timer.wall_time(), solve_time);
+		steps *= 2;
 	}
+	fclose(printout);
+}
