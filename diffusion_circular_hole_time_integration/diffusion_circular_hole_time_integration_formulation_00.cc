@@ -133,7 +133,7 @@ int main()
 
 	// numerical parameters
 	const unsigned int degree = 1;																	// degree of finite element approximation
-	const double alpha = 0.0;																		// time integration parameter
+	const double alpha = 0.5;																		// time integration parameter
 	const unsigned int method = 1;																	// numerical method
 																									// (0: Miehe's method, 1: alpha-family, 2: modified alpha-family)
 	MappingQGeneric<spacedim, spacedim> mapping_domain(1);											// FE mapping on domain
@@ -150,7 +150,7 @@ int main()
 								+ "_" + Utilities::to_string(method);
 	const string file_name_res	= "results/results_alpha" + variant_string + ".dat";				// file where results are stored
 	const string file_name_ref	= "results/results_ref.dat";										// file where reference solution is stored
-	const bool read_reference_from_file = true;														// determines whether reference solution is read from file or computed
+	const bool read_reference_from_file = false;														// determines whether reference solution is read from file or computed
 																									// (of course, it must be computed at least once ...)
 	const unsigned int solver_sym = 0;																// solver for method != 1: 0 - PARDISO, 1 - MA57, else - UMFPACK
 	const unsigned int solver_unsym = 1;															// solver for method == 1: 0 - PARDISO, else - UMFPACK
